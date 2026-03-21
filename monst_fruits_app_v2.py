@@ -378,6 +378,8 @@ if "logged_in_user_id" not in st.session_state:
 if "logged_in_username" not in st.session_state:
     st.session_state["logged_in_username"] = ""
 
+accounts = []
+
 if st.session_state["logged_in_user_id"] is None:
     st.subheader("ログイン")
 
@@ -441,14 +443,12 @@ if st.session_state["logged_in_user_id"] is not None:
 selected_account_id = None
 selected_account_name = None
 
-if accounts:
+if st.session_state["logged_in_user_id"] is not None and accounts:
     account_options = {acc[1]: acc[0] for acc in accounts}
     selected_account_name = st.selectbox("アカウントを選択", list(account_options.keys()))
     selected_account_id = account_options[selected_account_name]
 
     st.write(f"選択中: {selected_account_name} / ID: {selected_account_id}")
-
-
 # -----------------------
 # キャラ管理
 # -----------------------
