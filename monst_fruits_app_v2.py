@@ -54,21 +54,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
-def create_default_user():
-    conn = sqlite3.connect("monster_app.db")
-    c = conn.cursor()
-
-    c.execute("SELECT * FROM users")
-    users = c.fetchall()
-
-    if len(users) == 0:
-        c.execute("INSERT INTO users (username) VALUES (?)", ("default_user",))
-
-    conn.commit()
-    conn.close()
-
-
 def add_account(user_id, account_name):
     conn = sqlite3.connect("monster_app.db")
     c = conn.cursor()
@@ -292,11 +277,45 @@ def handle_add_entry(selected_account_id, selected_account_name):
     else:
         st.session_state["add_error"] = "キャラ名を入れて"
         st.session_state["add_success"] = ""
+def get_user_by_name(username):
+    conn = sqlite3.connect("monster_app.db")
+    c = conn.cursor()
+
+    c.execute(
+        "SELECT id, username FROM users WHERE username = ?",
+        (username,)
+    )
+
+    user = c.fetchone()
+    conn.close()
+    return user
+
+
+def create_user(username):
+    conn = sqlite3.connect("monster_app.db")
+    c = conn.cursor()
+
+    c.execute(
+        "INSERT INTO users (username) VALUES (?)",
+        (username,)
+    )
+
+    conn.commit()
+    user_id = c.lastrowid
+    conn.close()
+    return user_id
+def login_or_create_user(username):
+    user = get_user_by_name(username)
+
+    if user:
+        return user[0]  # id
+    else:
+        return create_user(username)
 # -----------------------
 # 初期化
 # -----------------------
 init_db()
-create_default_user()
+
 
 GRADE_OPTIONS = ["", "EL", "特L"]
 FRUIT_OPTIONS = [
@@ -349,17 +368,46 @@ FRUIT_OPTIONS = [
     # その他（追加されてたらここに）
 ]
 
-USER_ID = 1
-
-
 # -----------------------
 # UI
 # -----------------------
 st.title("モンストアプリ v2")
 
-accounts = get_accounts(USER_ID)
+if "logged_in_user_id" not in st.session_state:
+    st.session_state["logged_in_user_id"] = None
 
+if "logged_in_username" not in st.session_state:
+    st.session_state["logged_in_username"] = ""
 
+if st.session_state["logged_in_user_id"] is None:
+    st.subheader("ログイン")
+
+    login_name = st.text_input("ユーザー名", key="login_name")
+
+    if st.button("ログイン / 新規作成", key="login_button"):
+        if login_name.strip():
+            user_id = login_or_create_user(login_name.strip())
+            st.session_state["logged_in_user_id"] = user_id
+            st.session_state["logged_in_username"] = login_name.strip()
+            st.rerun()
+        else:
+            st.error("ユーザー名を入れて")
+
+if st.session_state["logged_in_user_id"] is not None:
+    USER_ID = st.session_state["logged_in_user_id"]
+
+    st.success(f"ログイン中: {st.session_state['logged_in_username']}")
+
+    if st.button("ログアウト", key="logout_button"):
+        st.session_state["logged_in_user_id"] = None
+        st.session_state["logged_in_username"] = ""
+        st.rerun()
+
+    accounts = get_accounts(USER_ID)
+
+    # ここから下にアカウント管理
+    st.subheader("アカウント管理")
+    ...
 
 # -----------------------
 # アカウント管理
