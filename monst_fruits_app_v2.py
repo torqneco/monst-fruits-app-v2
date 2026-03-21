@@ -368,7 +368,6 @@ FRUIT_OPTIONS = [
     # その他（追加されてたらここに）
 ]
 
-# -----------------------
 # UI
 # -----------------------
 st.title("モンストアプリ v2")
@@ -405,41 +404,36 @@ if st.session_state["logged_in_user_id"] is not None:
 
     accounts = get_accounts(USER_ID)
 
-    # ここから下にアカウント管理
+    # -----------------------
+    # アカウント管理
+    # -----------------------
     st.subheader("アカウント管理")
-    ...
 
-# -----------------------
-# アカウント管理
-# -----------------------
-st.subheader("アカウント管理")
+    new_account = st.text_input("アカウント名", key="new_account")
 
-new_account = st.text_input("アカウント名")
+    if st.button("アカウント追加", key="add_account_button"):
+        if new_account.strip():
+            add_account(USER_ID, new_account.strip())
+            st.success("追加した")
+            st.rerun()
+        else:
+            st.error("名前入れて")
 
-if st.button("アカウント追加"):
-    if new_account.strip():
-        add_account(USER_ID, new_account)
-        st.success("追加した")
-        st.rerun()
+    if accounts:
+        st.write("### アカウント一覧")
+
+        for acc in accounts:
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                st.write(acc[1])
+
+            with col2:
+                if st.button("削除", key=f"delete_{acc[0]}"):
+                    delete_account(acc[0])
+                    st.rerun()
     else:
-        st.error("名前入れて")
-
-if accounts:
-    st.write("### アカウント一覧")
-
-    for acc in accounts:
-        col1, col2 = st.columns([3, 1])
-
-        with col1:
-            st.write(acc[1])
-
-        with col2:
-            if st.button("削除", key=f"delete_{acc[0]}"):
-                delete_account(acc[0])
-                st.rerun()
-else:
-    st.write("まだアカウントがありません")
-
+        st.write("まだアカウントがありません")
 
 # -----------------------
 # 選択中アカウント
