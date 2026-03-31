@@ -1,9 +1,11 @@
 import sqlite3
 import pandas as pd
+import hashlib
 from datetime import datetime
 import streamlit as st
 import csv
 import io
+
 CSV_HEADERS = [
     "account_id",
     "character",
@@ -25,15 +27,18 @@ def init_db():
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
     )
     """)
 
     c.execute("""
     CREATE TABLE IF NOT EXISTS game_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        account_name TEXT
+        user_id INTEGER NOT NULL,
+        account_name TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
 
@@ -47,7 +52,8 @@ def init_db():
         fruit3 TEXT,
         fruit4 TEXT,
         note TEXT,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (account_id) REFERENCES game_accounts(id)
     )
     """)
 
@@ -59,12 +65,25 @@ def add_account(user_id, account_name):
     c = conn.cursor()
 
     c.execute(
+        "SELECT id FROM game_accounts WHERE user_id = ? AND account_name = ?",
+        (user_id, account_name)
+    )
+    existing = c.fetchone()
+
+    if existing:
+        conn.close()
+        return False, "そのアカウント名は既にあります"
+
+    c.execute(
         "INSERT INTO game_accounts (user_id, account_name) VALUES (?, ?)",
         (user_id, account_name)
     )
 
     conn.commit()
     conn.close()
+    return True, "追加した"
+
+
 
 
 def get_accounts(user_id):
@@ -192,7 +211,8 @@ def csv_file_to_rows(uploaded_file):
         })
 
     return rows
-def insert_many(rows):
+
+def insert_many(account_id, rows):
     conn = sqlite3.connect("monster_app.db")
     c = conn.cursor()
     now = datetime.now().isoformat(timespec="seconds")
@@ -204,7 +224,7 @@ def insert_many(rows):
         """,
         [
             (
-                int(r.get("account_id") or 0),
+                account_id,
                 (r.get("character") or ""),
                 (r.get("fruit1") or None),
                 (r.get("fruit2") or None),
@@ -277,12 +297,16 @@ def handle_add_entry(selected_account_id, selected_account_name):
     else:
         st.session_state["add_error"] = "キャラ名を入れて"
         st.session_state["add_success"] = ""
+
+def hash_password(password):
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    
 def get_user_by_name(username):
     conn = sqlite3.connect("monster_app.db")
     c = conn.cursor()
 
     c.execute(
-        "SELECT id, username FROM users WHERE username = ?",
+        "SELECT id, username, password_hash FROM users WHERE username = ?",
         (username,)
     )
 
@@ -290,27 +314,70 @@ def get_user_by_name(username):
     conn.close()
     return user
 
+def register_user(username, password):
+    username = username.strip()
+    password = password.strip()
 
-def create_user(username):
+    if not username:
+        return False, "ユーザー名を入れて"
+    if not password:
+        return False, "パスワードを入れて"
+    if len(password) < 4:
+        return False, "パスワードは4文字以上にして"
+
     conn = sqlite3.connect("monster_app.db")
     c = conn.cursor()
 
+    c.execute("SELECT id FROM users WHERE username = ?", (username,))
+    existing = c.fetchone()
+
+    if existing:
+        conn.close()
+        return False, "そのユーザー名は既に使われています"
+
+    password_hash = hash_password(password)
+    created_at = datetime.now().isoformat(timespec="seconds")
+
     c.execute(
-        "INSERT INTO users (username) VALUES (?)",
-        (username,)
+        "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+        (username, password_hash, created_at)
     )
 
     conn.commit()
     user_id = c.lastrowid
     conn.close()
-    return user_id
-def login_or_create_user(username):
-    user = get_user_by_name(username)
 
-    if user:
-        return user[0]  # id
-    else:
-        return create_user(username)
+    return True, {"id": user_id, "username": username}
+
+def login_user(username, password):
+    username = username.strip()
+    password = password.strip()
+
+    if not username:
+        return False, "ユーザー名を入れて"
+    if not password:
+        return False, "パスワードを入れて"
+
+    conn = sqlite3.connect("monster_app.db")
+    c = conn.cursor()
+
+    c.execute(
+        "SELECT id, username, password_hash FROM users WHERE username = ?",
+        (username,)
+    )
+    user = c.fetchone()
+    conn.close()
+
+    if not user:
+        return False, "ユーザー名またはパスワードが違います"
+
+    user_id, db_username, db_password_hash = user
+
+    if db_password_hash != hash_password(password):
+        return False, "ユーザー名またはパスワードが違います"
+
+    return True, {"id": user_id, "username": db_username}
+
 # -----------------------
 # 初期化
 # -----------------------
@@ -367,11 +434,9 @@ FRUIT_OPTIONS = [
 
     # その他（追加されてたらここに）
 ]
-
+# -----------------------
 # UI
 # -----------------------
-st.title("モンストアプリ v2")
-
 if "logged_in_user_id" not in st.session_state:
     st.session_state["logged_in_user_id"] = None
 
@@ -383,16 +448,32 @@ accounts = []
 if st.session_state["logged_in_user_id"] is None:
     st.subheader("ログイン")
 
-    login_name = st.text_input("ユーザー名", key="login_name")
+    mode = st.radio("選んで", ["ログイン", "新規登録"], horizontal=True)
 
-    if st.button("ログイン / 新規作成", key="login_button"):
-        if login_name.strip():
-            user_id = login_or_create_user(login_name.strip())
-            st.session_state["logged_in_user_id"] = user_id
-            st.session_state["logged_in_username"] = login_name.strip()
-            st.rerun()
-        else:
-            st.error("ユーザー名を入れて")
+    login_name = st.text_input("ユーザー名", key="login_name")
+    login_password = st.text_input("パスワード", type="password", key="login_password")
+
+    if mode == "ログイン":
+        if st.button("ログイン", key="login_button"):
+            success, result = login_user(login_name, login_password)
+
+            if success:
+                st.session_state["logged_in_user_id"] = result["id"]
+                st.session_state["logged_in_username"] = result["username"]
+                st.rerun()
+            else:
+                st.error(result)
+
+    else:
+        if st.button("新規登録", key="register_button"):
+            success, result = register_user(login_name, login_password)
+
+            if success:
+                st.session_state["logged_in_user_id"] = result["id"]
+                st.session_state["logged_in_username"] = result["username"]
+                st.rerun()
+            else:
+                st.error(result)
 
 if st.session_state["logged_in_user_id"] is not None:
     USER_ID = st.session_state["logged_in_user_id"]
@@ -400,12 +481,45 @@ if st.session_state["logged_in_user_id"] is not None:
     st.success(f"ログイン中: {st.session_state['logged_in_username']}")
 
     if st.button("ログアウト", key="logout_button"):
-        st.session_state["logged_in_user_id"] = None
-        st.session_state["logged_in_username"] = ""
+        keys_to_clear = [
+            "logged_in_user_id",
+            "logged_in_username",
+            "login_name",
+            "login_password",
+            "character_name",
+            "fruit1_select",
+            "grade1_select",
+            "fruit2_select",
+            "grade2_select",
+            "fruit3_select",
+            "grade3_select",
+            "fruit4_select",
+            "grade4_select",
+            "note_input",
+            "add_success",
+            "add_error",
+            "search_character",
+            "search_fruit",
+            "search_note",
+            "edit_target",
+            "edit_fruit1",
+            "edit_grade1",
+            "edit_fruit2",
+            "edit_grade2",
+            "edit_fruit3",
+            "edit_grade3",
+            "edit_fruit4",
+            "edit_grade4",
+            "edit_note",
+        ]
+
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
         st.rerun()
 
     accounts = get_accounts(USER_ID)
-
     # -----------------------
     # アカウント管理
     # -----------------------
@@ -415,9 +529,12 @@ if st.session_state["logged_in_user_id"] is not None:
 
     if st.button("アカウント追加", key="add_account_button"):
         if new_account.strip():
-            add_account(USER_ID, new_account.strip())
-            st.success("追加した")
-            st.rerun()
+            success, message = add_account(USER_ID, new_account.strip())
+            if success:
+                st.success(message)
+                st.rerun()
+            else:
+                st.error(message)
         else:
             st.error("名前入れて")
 
@@ -481,8 +598,6 @@ if selected_account_id is not None:
         )
 
         if entries:
-            import pandas as pd
-
             table_data = []
             for entry in entries:
                 table_data.append({
@@ -642,7 +757,7 @@ if selected_account_id is not None:
                         st.error(f"CSVの列が足りない: {missing}")
                     else:
                         if st.button("取り込み実行", key="csv_import_button"):
-                            insert_many(rows_in)
+                            insert_many(selected_account_id, rows_in)
                             st.success(f"取り込み完了！（{len(rows_in)}件）")
                             st.rerun()
 
